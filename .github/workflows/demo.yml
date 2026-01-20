@@ -1,0 +1,57 @@
+name: DR-PACT AI Demo
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Allows you to run this manually from the Actions tab
+
+jobs:
+  ai-contract-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout the code
+    - uses: actions/checkout@v4
+
+    # 2. Setup Python (for Agent & Provider)
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # 3. Setup Node.js (for Consumer)
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    # 4. Install All Dependencies
+    - name: Install Dependencies
+      run: |
+        # Install AI Agent deps
+        pip install -r agent/requirements.txt
+        # Install Provider deps
+        pip install -r provider-py/requirements.txt
+        # Install Consumer deps
+        cd consumer-ts && npm install
+
+    # 5. 🤖 Run the AI Agent
+    # This reads both codes and generates the contract file
+    - name: 🤖 AI Agent - Generate Contracts
+      env:
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      run: python agent/generator.py --provider groq
+
+    # 6. 🧪 Run Consumer Tests
+    # This runs the generated Pact test to create the JSON contract
+    - name: 🧪 Run Consumer Tests (Generate Pact JSON)
+      run: cd consumer-ts && npm test
+
+    # 7. ✅ Verify Provider
+    # This spins up the Python API and verifies it against the Pact JSON
+    - name: ✅ Verify Provider API
+      run: |
+        # Depending on how your pytest is set up, this usually handles the server start
+        cd provider-py && pytest tests/test_pact.py -v
