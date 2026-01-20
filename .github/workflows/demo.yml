@@ -50,8 +50,27 @@ jobs:
       run: cd consumer-ts && npm test
 
     # 7. ✅ Verify Provider
-    # This spins up the Python API and verifies it against the Pact JSON
+    # We start the Flask app in the background using '&'
+    # Then we wait a few seconds for it to boot up
+    # Then we run the tests against 'localhost'
     - name: ✅ Verify Provider API
       run: |
-        # Depending on how your pytest is set up, this usually handles the server start
+        echo "🚀 Starting Provider API in background..."
+        
+        # Start the app and send logs to a file so we don't clutter the output
+        # Use 'python -m provider-py.app' or just 'python provider-py/app.py' depending on your structure
+        # ensuring PYTHONPATH includes the current directory
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/provider-py
+        nohup python provider-py/app.py > provider.log 2>&1 &
+        
+        # Wait 5 seconds to ensure Flask is ready
+        echo "⏳ Waiting for server to boot..."
+        sleep 5
+        
+        # Print the logs just to be safe (helps debugging)
+        echo "📄 Server Logs:"
+        cat provider.log
+        
+        # Now run the verification tests
+        echo "🧪 Running Pytest..."
         cd provider-py && pytest tests/test_pact.py -v
