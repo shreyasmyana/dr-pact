@@ -9,129 +9,164 @@ Analyze BOTH files and GENERATE a Pact V3 Consumer Contract Test in TypeScript.
 
 ---
 
+## CRITICAL: CONTRACT TESTING PRINCIPLES
+
+**The Pact mock server is the source of truth, NOT the live server.**
+
+In proper contract testing:
+1. Consumer tests run the **actual client code** against a **Pact mock server**
+2. The mock server returns responses defined in the contract
+3. This verifies the client code correctly handles expected responses
+4. The generated Pact file is then used to verify the provider
+
+**YOU MUST dynamically detect and import the actual client class from the consumer code, NOT make direct HTTP calls.**
+
+---
+
 ## STEP 1: ANALYZE THE CODE
 
-### From Consumer Code, Extract:
-- **Service names** - Class name, file name, or comments → use for `consumer` config
-- **Provider name** - API name from URLs, base paths, or comments → use for `provider` config
-- **Endpoints** - All HTTP methods, paths, query parameters
-- **Request structures** - Body fields, headers, types
-- **Response types** - Expected response fields and types
-- **HTTP client used** - axios, fetch, got, etc. → use the SAME client in tests
+### From Consumer Code, DYNAMICALLY Extract:
 
-### From Provider Code, Extract:
-Look for validation patterns in ANY language:
+1. **Detect the Client Class/Module:**
+   - Look for `export class`, `export default class`, `module.exports` patterns
+   - Identify the class that wraps HTTP calls (contains axios, fetch, got, http, etc.)
+   - Note the exact class name and file path for import statement
+   - **⚠️ CRITICAL: File paths are CASE-SENSITIVE. Use the EXACT filename casing from the source (e.g., `insulinClient.ts` NOT `InsulinClient.ts`)**
+
+2. **Detect Client Methods:**
+   - Find all public methods that make HTTP requests
+   - Note method names, parameters, and return types
+   - These methods will be called in the test's `executeTest` block
+
+3. **Detect Constructor Pattern:**
+   - Check if the client accepts a `baseUrl` or `baseURL` parameter in constructor
+   - This is where `mockServer.url` will be passed
+
+4. **Extract Service Names:**
+   - Consumer name: from class name, file name, or comments
+   - Provider name: from API URLs, base paths, service comments
+
+5. **Extract Endpoints:**
+   - All HTTP methods (GET, POST, PUT, PATCH, DELETE)
+   - URL paths and query parameters
+   - Request body structures and types
+   - Response types and fields
+
+### From Provider Code, Extract Validation Rules:
 
 | Pattern (any language) | Examples | Action |
 |------------------------|----------|--------|
-| Minimum array length | `len(arr) < N`, `arr.length < N`, `arr.size() < N`, `if len(x) < 2` | Use `eachLike(item, N)` where N is the minimum |
-| Array can be empty | `items = []`, `items: []`, empty initialization | Use literal `[]` |
-| Enum/union values | `status in ['a','b']`, `type Status = 'a' \| 'b'` | Use `string('a')` with ONE value |
+| Minimum array length | `len(arr) < N`, `arr.length < N`, `arr.size() < N` | Use `eachLike(item, N)` |
+| Array can be empty | `items = []`, empty initialization | Use literal `[]` |
+| Enum/union values | `status in ['a','b']`, `type Status = 'a' \| 'b'` | Use `string('firstValue')` |
 | Required fields | Field validation, null checks | Include all required fields |
 | Numeric constraints | Range checks, min/max | Use valid example values |
 
 **CRITICAL: Array Minimum Length Detection**
-When the provider code has validation like:
 - `if len(readings) < 2:` → Use `eachLike(number(100), 2)` 
 - `if len(items) < 3:` → Use `eachLike(item, 3)`
-- `if arr.length < N:` → Use `eachLike(item, N)`
-
-The second parameter to `eachLike()` specifies the MINIMUM number of elements in the generated array.
-Default `eachLike(item)` only generates 1 element, which will FAIL provider validation if minimum > 1.
+- Default `eachLike(item)` only generates 1 element - will FAIL if minimum > 1
 
 ---
 
 ## STEP 2: GENERATE THE CONTRACT TEST
 
-### Template Structure:
+### Template Structure (Replace placeholders with detected values):
 
 ```typescript
 import { PactV3, MatchersV3 } from '@pact-foundation/pact';
 import path from 'path';
-// Import the SAME HTTP client the consumer uses (axios, fetch wrapper, got, etc.)
+// ⚠️ USE THE EXACT IMPORT PATH PROVIDED IN THE INPUT
+// The FILENAME and IMPORT PATH are provided above the consumer code
+// Use them EXACTLY as given - do NOT change the casing!
+import { DetectedClassName } from '<USE_EXACT_IMPORT_PATH_FROM_INPUT>';
 
 const { string, number, eachLike, like, boolean } = MatchersV3;
 
 const provider = new PactV3({
-  consumer: '<ConsumerName>',      // Extract from consumer code
-  provider: '<ProviderName>',      // Extract from provider code  
+  consumer: '<DetectedConsumerName>',  // From class name or file
+  provider: '<DetectedProviderName>',  // From API URLs or comments
   dir: path.resolve(process.cwd(), '../pacts'),
   logLevel: 'warn',
 });
 
-describe('<ProviderName> Contract Tests', () => {
-  // Generate ONE test per endpoint found in consumer code
+describe('<DetectedProviderName> Contract Tests', () => {
+  // Generate ONE test per detected endpoint/method
+});
+```
+
+### ⚠️ CRITICAL: Import Path Rules
+1. The consumer code section includes `FILENAME:` and `IMPORT PATH:` lines
+2. Use the `IMPORT PATH` value EXACTLY as provided - it is case-sensitive
+3. Do NOT modify the casing (e.g., if it says `insulinClient`, don't change to `InsulinClient`)
+
+### ⚠️ CRITICAL: Test Pattern - Use the Detected Client Class
+
+**CORRECT Pattern:**
+```typescript
+it('should <describe the action>', async () => {
+  await provider
+    .given('<provider state>')
+    .uponReceiving('<request description>')
+    .withRequest({
+      method: '<DETECTED_METHOD>',
+      path: '<DETECTED_PATH>',
+      // headers only for POST/PUT/PATCH
+    })
+    .willRespondWith({
+      status: 200,
+      body: like({ /* detected response fields */ }),
+    });
+
+  await provider.executeTest(async (mockServer) => {
+    // ✅ Create instance of DETECTED client class with mock server URL
+    const client = new <DetectedClientClass>(mockServer.url);
+    
+    // ✅ Call the DETECTED client method (not raw HTTP)
+    const response = await client.<detectedMethodName>(<detectedParams>);
+    
+    // ✅ Assert on response directly (client returns parsed data)
+    expect(response.<field>).toBe(<expectedValue>);
+  });
+});
+```
+
+**❌ WRONG - Never generate this:**
+```typescript
+// ❌ WRONG: Bypasses client code, doesn't test actual implementation
+await provider.executeTest(async (mockServer) => {
+  const response = await axios.get(`${mockServer.url}/path`);
+  expect(response.data.field).toBe('expected');
 });
 ```
 
 ### HTTP Method Patterns:
 
-**GET Request (no body):**
+**GET Request:**
 ```typescript
-it('should <describe action>', async () => {
-  await provider
-    .given('<provider state>')
-    .uponReceiving('<request description>')
-    .withRequest({
-      method: 'GET',
-      path: '/path',
-      // For query params: query: { key: 'value' }
-    })
-    .willRespondWith({
-      status: 200,
-      body: like({ /* response fields */ }),
-    });
-
-  await provider.executeTest(async (mockServer) => {
-    // Use consumer's HTTP client
-    const response = await httpClient.get(`${mockServer.url}/path`);
-    expect(response.status).toBe(200);
-  });
+await provider.executeTest(async (mockServer) => {
+  const client = new <DetectedClientClass>(mockServer.url);
+  const response = await client.<detectedGetMethod>();
+  expect(response.<detectedField>).toBeDefined();
 });
 ```
 
-**POST/PUT/PATCH Request (with body):**
+**POST/PUT/PATCH Request:**
 ```typescript
-it('should <describe action>', async () => {
-  await provider
-    .given('<provider state>')
-    .uponReceiving('<request description>')
-    .withRequest({
-      method: 'POST',  // or PUT, PATCH
-      path: '/path',
-      headers: { 'Content-Type': 'application/json' },
-      body: like({ /* request fields */ }),
-    })
-    .willRespondWith({
-      status: 200,  // or 201 for POST creating resource
-      body: like({ /* response fields */ }),
-    });
-
-  await provider.executeTest(async (mockServer) => {
-    const response = await httpClient.post(`${mockServer.url}/path`, requestData);
-    expect(response.status).toBe(200);
+await provider.executeTest(async (mockServer) => {
+  const client = new <DetectedClientClass>(mockServer.url);
+  const response = await client.<detectedPostMethod>({
+    // Use detected request fields from consumer code
   });
+  expect(response.<detectedField>).toBeDefined();
 });
 ```
 
 **DELETE Request:**
 ```typescript
-it('should <describe action>', async () => {
-  await provider
-    .given('<provider state>')
-    .uponReceiving('<request description>')
-    .withRequest({
-      method: 'DELETE',
-      path: '/path/id',
-    })
-    .willRespondWith({
-      status: 204,  // or 200 with body
-    });
-
-  await provider.executeTest(async (mockServer) => {
-    const response = await httpClient.delete(`${mockServer.url}/path/id`);
-    expect(response.status).toBe(204);
-  });
+await provider.executeTest(async (mockServer) => {
+  const client = new <DetectedClientClass>(mockServer.url);
+  await client.<detectedDeleteMethod>(<detectedIdParam>);
 });
 ```
 
@@ -188,17 +223,21 @@ it('should <describe action>', async () => {
 
 ---
 
+
 ## RULES SUMMARY:
 
-1. **Extract names** from actual consumer/provider code - never hardcode
-2. **Generate tests for ALL endpoints** found in consumer code
-3. **Use same HTTP client** as consumer (axios, fetch, etc.)
-4. **Match provider validation** - array minimums, required fields, enums
-5. **⚠️ ONLY 2xx SUCCESS TESTS** - Do NOT generate tests for 4xx or 5xx error responses. No "missing fields" tests. No "invalid input" tests. Only happy path scenarios.
-6. **Headers only for POST/PUT/PATCH** - GET/DELETE don't need Content-Type
-7. **Empty arrays = literal `[]`** - Never use `eachLike('')` for possibly empty arrays
-8. **Enums = `string('oneValue')`** - Never use `oneOf()` 
-9. **Check enum assertions** - Use `expect([...]).toContain(val)` pattern
+1. **⚠️ USE EXACT IMPORT PATH** - The input includes `IMPORT PATH:` - use it EXACTLY as provided. File paths are CASE-SENSITIVE. Do NOT change casing.
+2. **Import and use the client class** - Import the detected class and use it in tests. Never use raw axios/fetch/got directly.
+3. **Extract ALL names dynamically** - Consumer name, provider name, method names, field names - all from analyzing the provided code.
+4. **Generate tests for ALL detected endpoints** - One test per client method that makes HTTP requests.
+5. **Pass `mockServer.url` to client constructor** - The detected client class should accept a base URL parameter.
+6. **Call detected client methods** - Not raw HTTP calls.
+7. **Match provider validation rules** - Array minimums, required fields, enum values.
+8. **⚠️ ONLY 2xx SUCCESS TESTS** - No error scenarios. Only happy path tests.
+9. **Headers only for POST/PUT/PATCH** - GET/DELETE don't need Content-Type.
+10. **Empty arrays = literal `[]`** - Never use `eachLike('')`.
+11. **Enums = `string('firstValue')`** - Never use `oneOf()` which doesn't exist.
+12. **Assert on response directly** - Client methods return parsed data. Use `response.field` NOT `response.data.field`.
 
 ---
 

@@ -81,15 +81,22 @@ def call_openai(system_prompt: str, source_code: str, provider_code: str) -> str
     
     print("🤖 Calling OpenAI GPT-4o...")
     
+    # Get the actual filename (without full path) for the import statement
+    consumer_filename = SOURCE_FILE.stem  # e.g., "insulinClient" (without .ts)
+    
     user_content = f"""Analyze these files and generate Pact contract tests.
 
 === CONSUMER (TypeScript Client) ===
+FILENAME: {consumer_filename}.ts
+IMPORT PATH: ../src/{consumer_filename}
+
 {source_code}
 
 === PROVIDER (Python API) ===
 {provider_code}
 
-Generate contract tests that satisfy the provider's validation requirements."""
+Generate contract tests that satisfy the provider's validation requirements.
+IMPORTANT: Use the EXACT import path provided above: '../src/{consumer_filename}'"""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -121,15 +128,22 @@ def call_anthropic(system_prompt: str, source_code: str, provider_code: str) -> 
     
     print("🤖 Calling Anthropic Claude 3.5 Sonnet...")
     
+    # Get the actual filename (without full path) for the import statement
+    consumer_filename = SOURCE_FILE.stem  # e.g., "insulinClient" (without .ts)
+    
     user_content = f"""Analyze these files and generate Pact contract tests.
 
 === CONSUMER (TypeScript Client) ===
+FILENAME: {consumer_filename}.ts
+IMPORT PATH: ../src/{consumer_filename}
+
 {source_code}
 
 === PROVIDER (Python API) ===
 {provider_code}
 
-Generate contract tests that satisfy the provider's validation requirements."""
+Generate contract tests that satisfy the provider's validation requirements.
+IMPORTANT: Use the EXACT import path provided above: '../src/{consumer_filename}'"""
     
     response = client.messages.create(
         model="claude-3-5-sonnet-20241022",
@@ -162,17 +176,24 @@ def call_gemini(system_prompt: str, source_code: str, provider_code: str) -> str
     
     print("🤖 Calling Google Gemini 2.0 Flash (FREE)...")
     
+    # Get the actual filename (without full path) for the import statement
+    consumer_filename = SOURCE_FILE.stem  # e.g., "insulinClient" (without .ts)
+    
     prompt = f"""{system_prompt}
 
 Analyze these files and generate Pact contract tests.
 
 === CONSUMER (TypeScript Client) ===
+FILENAME: {consumer_filename}.ts
+IMPORT PATH: ../src/{consumer_filename}
+
 {source_code}
 
 === PROVIDER (Python API) ===
 {provider_code}
 
-Generate contract tests that satisfy the provider's validation requirements."""
+Generate contract tests that satisfy the provider's validation requirements.
+IMPORTANT: Use the EXACT import path provided above: '../src/{consumer_filename}'"""
     
     response = client.models.generate_content(
         model="gemini-2.0-flash",
@@ -200,19 +221,30 @@ def call_groq(system_prompt: str, source_code: str, provider_code: str) -> str:
         print("💡 Get a FREE API key at: https://console.groq.com/keys")
         sys.exit(1)
     
-    client = Groq(api_key=api_key)
+    # Create httpx client with SSL verification disabled (for corporate proxies)
+    import httpx
+    http_client = httpx.Client(verify=False)
+    client = Groq(api_key=api_key, http_client=http_client)
     
     print("🤖 Calling Groq Llama 3.3 70B (FREE)...")
+    print("⚠️  SSL verification disabled (required for corporate proxies)")
+    
+    # Get the actual filename (without full path) for the import statement
+    consumer_filename = SOURCE_FILE.stem  # e.g., "insulinClient" (without .ts)
     
     user_content = f"""Analyze these files and generate Pact contract tests.
 
 === CONSUMER (TypeScript Client) ===
+FILENAME: {consumer_filename}.ts
+IMPORT PATH: ../src/{consumer_filename}
+
 {source_code}
 
 === PROVIDER (Python API) ===
 {provider_code}
 
-Generate contract tests that satisfy the provider's validation requirements."""
+Generate contract tests that satisfy the provider's validation requirements.
+IMPORTANT: Use the EXACT import path provided above: '../src/{consumer_filename}'"""
     
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -250,17 +282,24 @@ def call_ollama(system_prompt: str, source_code: str, provider_code: str) -> str
         print("💡 Then pull a model: ollama pull llama3.2")
         sys.exit(1)
     
+    # Get the actual filename (without full path) for the import statement
+    consumer_filename = SOURCE_FILE.stem  # e.g., "insulinClient" (without .ts)
+    
     prompt = f"""{system_prompt}
 
 Analyze these files and generate Pact contract tests.
 
 === CONSUMER (TypeScript Client) ===
+FILENAME: {consumer_filename}.ts
+IMPORT PATH: ../src/{consumer_filename}
+
 {source_code}
 
 === PROVIDER (Python API) ===
 {provider_code}
 
-Generate contract tests that satisfy the provider's validation requirements."""
+Generate contract tests that satisfy the provider's validation requirements.
+IMPORTANT: Use the EXACT import path provided above: '../src/{consumer_filename}'"""
     
     response = requests.post(
         f"{ollama_url}/api/generate",

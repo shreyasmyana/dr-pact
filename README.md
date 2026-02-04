@@ -102,7 +102,47 @@ cd provider-py
 pytest tests/test_pact.py -v
 ```
 
-## 🔌 API Endpoints
+## � Contract Testing Flow
+
+This project follows proper **Consumer-Driven Contract Testing** principles:
+
+### 1. Consumer Tests Generate Pacts (Pact as Source of Truth)
+```
+consumer-ts/tests/contract.spec.ts
+    ↓
+Uses InsulinClient against Pact Mock Server
+    ↓
+Generates pacts/InsulinClient-RiskAlgoService.json
+```
+
+The consumer tests:
+- Define expected interactions (request/response pairs)
+- Test the **actual client code** (`InsulinClient`) against a **mock server**
+- The mock server responses come from the Pact contract (source of truth)
+- Generate a Pact JSON file capturing the consumer's expectations
+
+### 2. Provider Verifies Against Pact Contract
+```
+pacts/InsulinClient-RiskAlgoService.json (SOURCE OF TRUTH)
+    ↓
+Pact Verifier reads ALL interactions from Pact file
+    ↓
+Replays requests against provider, verifies responses match contract
+```
+
+The provider tests:
+- Read the Pact file (the ONLY source of truth)
+- Pact Verifier replays each interaction from the contract
+- Verify the provider's responses match the contract expectations
+- NO manual HTTP requests - everything comes from the Pact file
+
+### Key Principles:
+- **Pact is the source of truth** - not the live server
+- **Consumer tests don't hit live servers** - they use Pact mock server
+- **Provider tests only reference the Pact file** - Verifier replays interactions
+- **Provider tests verify against the contract** - ensuring compatibility
+
+## �🔌 API Endpoints
 
 ### Health Check
 ```http
