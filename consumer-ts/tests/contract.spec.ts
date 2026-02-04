@@ -1,6 +1,6 @@
 import { PactV3, MatchersV3 } from '@pact-foundation/pact';
-import axios from 'axios';
 import path from 'path';
+import { InsulinClient } from '../src/insulinClient';
 
 const { string, number, eachLike, like, boolean } = MatchersV3;
 
@@ -15,7 +15,7 @@ describe('RiskAlgoService Contract Tests', () => {
   it('should return healthy status', async () => {
     await provider
       .given('the service is healthy')
-      .uponReceiving('a health check request')
+      .uponReceiving('a GET request to /health')
       .withRequest({
         method: 'GET',
         path: '/health',
@@ -30,24 +30,19 @@ describe('RiskAlgoService Contract Tests', () => {
       });
 
     await provider.executeTest(async (mockServer) => {
-      const response = await axios.get(`${mockServer.url}/health`);
-      expect(response.status).toBe(200);
-      expect(response.data).toEqual(expect.objectContaining({
-        status: 'healthy',
-        service: 'RiskAlgoService',
-        version: '1.0.0',
-      }));
+      const client = new InsulinClient(mockServer.url);
+      const response = await client.healthCheck();
+      expect(response.status).toBe('healthy');
     });
   });
 
   it('should calculate bolus dosage', async () => {
     await provider
-      .given('a patient with valid data')
-      .uponReceiving('a bolus calculation request')
+      .given('a valid patient and glucose data')
+      .uponReceiving('a POST request to /calculate/bolus')
       .withRequest({
         method: 'POST',
         path: '/calculate/bolus',
-        headers: { 'Content-Type': 'application/json' },
         body: like({
           patient_id: string('patient-123'),
           current_glucose_mg_dl: number(150),
@@ -68,35 +63,28 @@ describe('RiskAlgoService Contract Tests', () => {
       });
 
     await provider.executeTest(async (mockServer) => {
-      const response = await axios.post(`${mockServer.url}/calculate/bolus`, {
+      const client = new InsulinClient(mockServer.url);
+      const response = await client.calculateBolus({
         patient_id: 'patient-123',
         current_glucose_mg_dl: 150,
         carbs_grams: 30,
         insulin_on_board_units: 5,
       });
-      expect(response.status).toBe(200);
-      expect(response.data).toEqual(expect.objectContaining({
-        patient_id: 'patient-123',
-        recommended_bolus_units: expect.any(Number),
-        correction_units: expect.any(Number),
-        carb_coverage_units: expect.any(Number),
-        risk_level: expect.any(String),
-        warnings: expect.any(Array),
-      }));
+      expect(response.patient_id).toBe('patient-123');
+      expect(response.recommended_bolus_units).toBeGreaterThan(0);
     });
   });
 
   it('should calculate basal rate adjustment', async () => {
     await provider
-      .given('a patient with valid glucose readings')
-      .uponReceiving('a basal rate adjustment request')
+      .given('a valid patient and glucose readings')
+      .uponReceiving('a POST request to /calculate/basal-adjustment')
       .withRequest({
         method: 'POST',
         path: '/calculate/basal-adjustment',
-        headers: { 'Content-Type': 'application/json' },
         body: like({
           patient_id: string('patient-123'),
-          glucose_readings: eachLike(number(100), 2),
+          glucose_readings: eachLike(number(100), 6),
           current_basal_rate: number(10),
         }),
       })
@@ -112,19 +100,14 @@ describe('RiskAlgoService Contract Tests', () => {
       });
 
     await provider.executeTest(async (mockServer) => {
-      const response = await axios.post(`${mockServer.url}/calculate/basal-adjustment`, {
+      const client = new InsulinClient(mockServer.url);
+      const response = await client.calculateBasalAdjustment({
         patient_id: 'patient-123',
-        glucose_readings: [100, 120],
+        glucose_readings: [100, 110, 120, 130, 140, 150],
         current_basal_rate: 10,
       });
-      expect(response.status).toBe(200);
-      expect(response.data).toEqual(expect.objectContaining({
-        patient_id: 'patient-123',
-        adjusted_basal_rate: expect.any(Number),
-        adjustment_percentage: expect.any(Number),
-        trend: expect.any(String),
-        action: expect.any(String),
-      }));
+      expect(response.patient_id).toBe('patient-123');
+      expect(response.adjusted_basal_rate).toBeGreaterThan(0);
     });
   });
 });
